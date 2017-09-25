@@ -13,7 +13,7 @@ class AccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent, Ac
     * When there is no state (None) we provide the actions that will build the Entity
     * (equivalent to a constructor, but expressed as Command and Event Handlers)
     *
-    * When there is a state (Option[State]) we provide the actions that are able to update the Entity.
+    * When there is a state (Some[State]) we provide the actions that are able to update the Entity.
     *
     * In the absence of a snapshot, the Option[State] == None and we read events starting from first offset.
     * This basically replays the event that is responsible for creating the model (the seed event).
@@ -60,13 +60,13 @@ class AccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent, Ac
             case cmd => Failure(new RuntimeException("Insufficient balance"))
           }
           // NOTE: we don't need reply because Withdraw replies with Done
-          // and there is a implicit for it
+          // and there is an implicit for it
       }
 
 
   // read-only commands are no different, it's just an effect without a command handler
-  // behind the scenes, this is a regular command handler that doesn't emit events,
-  // doesn't have callbacks but do have a reply.
+  // behind the scenes, this is a regular Effect with a NoOps command handler.
+  // It doesn't have callbacks neither, but do have a reply.
   val readOnlyCommands =
     actions
       .onCommand {
