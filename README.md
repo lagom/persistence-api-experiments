@@ -93,7 +93,7 @@ Different than the `Deposit` variation, the `Withdraw` command handler do need t
 Because a `Withdraw` may fail, we use a variation of an `EffectBuilder` that expects a `Try[Event]`. This gives us the possibility to validate the command using idiomatic Scala. 
 That won't be possible in the Java variation unless we introduce a `Try` type or similar. 
 
-This `Withdraw` doesn't need to define a reply because it replies with `Done` and there is a implicit for it. We convert implicitly from `EffectBuilder` to `Effect`. That won't be possible in Java neither.
+`Withdraw` doesn't need to explicitly define a reply. The command definition specify it to be `Done` and there is an implicit to convert from `EffectBuilder` to `Effect`. That won't be possible in Java neither.
 
 ### ReadOnly Commands
 
