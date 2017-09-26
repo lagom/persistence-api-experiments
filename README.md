@@ -11,6 +11,8 @@ This current proposal has a few new features and/or advantages over the current 
 4. `Effect` is the new black. A command handler is a function from `Command => Effect[Command]` and we provide a `EffectBuilder` DSL for different types. At the moment we have support for `Effects` emitting: `Event`, `Seq[Event]`, `Option[Event]`, `Try[Event]` and `Try[Seq[Event]]`. 
 5. No need for `onReadOnlyCommand`. A read-only directive is a general `Effect` that does not emit events.
 
+Please, feel free to open issues to make suggestions and discuss any topic in detail.
+
 ## Behavior as Option[State] => Actions
 This is a important change that aleviates the API in many places and removes the need to come up with an artificial initial state. 
 
