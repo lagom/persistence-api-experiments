@@ -75,6 +75,7 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
 
   def Behavior = BehaviorBuilderFirst
 
+  // These should be called handlers. It's all the handlers a behavior will use.
   case class Actions(commandHandlers: CommandToEffect, eventHandlers: EventHandler) {
 
     def onCommand[C <: Command](effect: Effect[C]): Actions = {
@@ -98,7 +99,10 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
     def apply(): Actions = Actions(commandHandlers = PartialFunction.empty, eventHandlers = PartialFunction.empty)
   }
 
-  def actions = Actions()
+  // This could be `actionBuilder`. It is not providing access to the current actions. Instead
+  // it returns an empty 'Actions' I should use to build new actions which I will compose later.
+  def actionBuilder =
+    Actions()
 
   case class Effect[C <: WithReply](
                                      handler: PartialFunction[Command, Try[immutable.Seq[Event]]],

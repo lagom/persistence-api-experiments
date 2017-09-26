@@ -2,7 +2,7 @@ package com.lightbend.lagom.core.persistence.effects.core.persistence
 
 import com.lightbend.lagom.core.persistence.effects.core.persistence.PersistentEntity.ReplyType
 
-import scala.util.{Failure, Success}
+import scala.util.{ Failure, Success }
 
 
 class AccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent, Account] {
@@ -28,6 +28,19 @@ class AccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent, Ac
       .andThen { // Some[State] => Actions == State => Actions
         // here come the actions that are valid when Account
         // is already created
+        //
+        // IMS: I think it is unnecessary to make the argument of `andThen` a PartialFunction. If this branch
+        // is equivalent to `State => Actions` then we could require a `Function[State, Actions]`, right?
+        //
+        //
+        //     Behavior
+        //        .first { depositCommandActions orElse atCreationEvents}
+        //        .andThen { account =>
+        //              readOnlyCommands orElse
+        //              moreCommands orElse
+        //                  ...
+        //
+        //
         case account =>
           readOnlyCommands orElse
             withdrawCommandActions(account) orElse
@@ -36,8 +49,8 @@ class AccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent, Ac
       }
 
   // on creation and later
-  val depositCommandActions =
-    actions
+  val depositCommandActions: Actions =
+    actionBuilder
       .onCommand {
         // this is directive builder that expects one single Event
         Handler[Deposit]
@@ -52,9 +65,12 @@ class AccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent, Ac
       }
 
   def withdrawCommandActions(account: Account) =
-    actions
+    actionBuilder
       .onCommand {
         Handler[Withdraw]
+          // IMS: I think we're causing a lot of extra effort here. I mean, because one case may throw an exception
+          // we have to (1) call `attempt` and (2) wrap each result into Success or Failure. It's a necessary
+          // evil, unfortunately :-(
           .attempt.persistOne { // <- this Effect builder expects a Try[Event]
             case cmd if account.amount - cmd.amount >= 0 => Success(WithdrawExecuted(cmd.amount))
             case cmd => Failure(new RuntimeException("Insufficient balance"))
@@ -68,7 +84,7 @@ class AccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent, Ac
   // behind the scenes, this is a regular Effect with a NoOps command handler.
   // It doesn't have callbacks neither, but do have a reply.
   val readOnlyCommands =
-    actions
+    actionBuilder
       .onCommand {
         ReadOnly[GetBalance.type].replyWith(_.amount)
       }
@@ -78,15 +94,15 @@ class AccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent, Ac
         ReadOnly[GetState.type].replyWith(identity)
       }
 
-  val atCreationEvents =
-    actions
+  val atCreationEvents: Actions =
+    actionBuilder
       .onEvent {
         // at creation time, first DepositExecuted initialises the account
         case evt: DepositExecuted => Account(evt.amount)
       }
 
   def afterCreationEvents(account: Account) =
-    actions
+    actionBuilder
       .onEvent {
         case evt: DepositExecuted => account.copy(amount = account.amount + evt.amount)
         case evt: WithdrawExecuted => account.copy(amount = account.amount - evt.amount)
@@ -100,9 +116,11 @@ case class Account(amount: Double)
 sealed trait AccountCommand[R] extends ReplyType[R]
 
 case class Deposit(amount: Double) extends AccountCommand[Double]
+
 case class Withdraw(amount: Double) extends AccountCommand[Done]
 
 case object GetBalance extends AccountCommand[Double]
+
 case object GetState extends AccountCommand[Account]
 
 
