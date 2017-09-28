@@ -53,8 +53,7 @@ class AccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent, Ac
 
   def withdrawCommandHandlers(account: Account): CommandHandlers =
     onCommand {
-      Handler[Withdraw]
-        .attempt
+      TryHandler[Withdraw]
         .persistOne { // <- this Effect builder expects a Try[Event]
           case cmd =>
             account

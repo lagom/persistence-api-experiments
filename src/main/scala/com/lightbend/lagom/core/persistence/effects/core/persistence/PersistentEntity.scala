@@ -287,22 +287,31 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
         case cmd if handler.isDefinedAt(cmd) => Try(handler(cmd))
       }
 
-    object attempt {
-
-      def persistOne(handler: PartialFunction[C, Try[Event]]): EffectBuilderOne[C] =
-        EffectBuilderOne[C](handler)
-
-      def persistAll(handler: PartialFunction[C, Try[immutable.Seq[Event]]]): EffectBuilderAll[C] =
-        EffectBuilderAll[C](handler)
-
-    }
-
-    object optionally {
-      def persistOne(handler: PartialFunction[C, Option[Event]]): EffectBuilderOptionOne[C] =
-        EffectBuilderOptionOne[C](handler)
-    }
-
   }
 
 
+  object TryHandler {
+    def apply[C <: Command : ClassTag]: TryHandlerSyntax[C] =
+      new TryHandlerSyntax[C]
+  }
+
+  class TryHandlerSyntax[C <: WithReply : ClassTag] {
+
+    def persistOne(handler: PartialFunction[C, Try[Event]]): EffectBuilderOne[C] =
+      EffectBuilderOne[C](handler)
+
+    def persistAll(handler: PartialFunction[C, Try[immutable.Seq[Event]]]): EffectBuilderAll[C] =
+      EffectBuilderAll[C](handler)
+  }
+
+  object OptionHandler {
+    def apply[C <: Command : ClassTag]: OptionHandlerSyntax[C] =
+      new OptionHandlerSyntax[C]
+  }
+
+  class OptionHandlerSyntax[C <: WithReply : ClassTag] {
+
+    def persistOne(handler: PartialFunction[C, Option[Event]]): EffectBuilderOptionOne[C] =
+      EffectBuilderOptionOne[C](handler)
+  }
 }
