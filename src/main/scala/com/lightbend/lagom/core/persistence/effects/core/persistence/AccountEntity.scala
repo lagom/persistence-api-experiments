@@ -2,7 +2,7 @@ package com.lightbend.lagom.core.persistence.effects.core.persistence
 
 import com.lightbend.lagom.core.persistence.effects.core.persistence.PersistentEntity.ReplyType
 
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
 
 
 class AccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent, Account] {
@@ -54,10 +54,13 @@ class AccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent, Ac
   def withdrawCommandHandlers(account: Account): CommandHandlers =
     onCommand {
       Handler[Withdraw]
-        .attempt.persistOne { // <- this Effect builder expects a Try[Event]
-        case cmd if account.amount - cmd.amount >= 0 => Success(WithdrawExecuted(cmd.amount))
-        case cmd => Failure(new RuntimeException("Insufficient balance"))
-      }
+        .attempt
+        .persistOne { // <- this Effect builder expects a Try[Event]
+          case cmd =>
+            account
+              .validateWithdraw(cmd.amount) // <- this method returns a Try[Double]
+              .map(WithdrawExecuted)
+        }
       // NOTE: we don't need reply because Withdraw replies with Done
       // and there is an implicit for it
     }
@@ -93,7 +96,15 @@ class AccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent, Ac
 
 }
 
-case class Account(amount: Double)
+case class Account(amount: Double) {
+
+  def validateWithdraw(withdrawAmount: Double): Try[Double] = {
+    if (amount - withdrawAmount >= 0)
+      Success(withdrawAmount)
+    else
+      Failure(new RuntimeException("Insufficient balance"))
+  }
+}
 
 sealed trait AccountCommand[R] extends ReplyType[R]
 
