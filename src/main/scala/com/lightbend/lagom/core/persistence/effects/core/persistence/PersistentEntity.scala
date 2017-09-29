@@ -5,6 +5,7 @@ import com.sun.net.httpserver.Authenticator.Failure
 
 import scala.collection.immutable
 import scala.concurrent.Future
+import scala.language.implicitConversions
 import scala.reflect.ClassTag
 import scala.util.{Failure, Try}
 
@@ -27,9 +28,9 @@ object PersistentEntity {
 
 abstract class PersistentEntity[Command <: WithReply, Event, State] {
 
-  type Behavior = PartialFunction[Option[State], Actions]
+  type Behavior = PartialFunction[Option[State], Handlers]
 
-  type StateToActions = PartialFunction[State, Actions]
+  type StateToHandlers = PartialFunction[State, Handlers]
 
   type CommandToEffect = PartialFunction[Command, Effect[Command]]
   type CommandHandler = PartialFunction[Command, Try[immutable.Seq[Event]]]
@@ -49,11 +50,11 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
       *
       * Based on the observation that () => Actions can be lifted to None => Actions (see bellow)
       */
-    def first(creationActions: => Actions) =
+    def first(creationActions: => Handlers) =
       new BehaviorBuilderAndThen(creationActions)
   }
 
-  class BehaviorBuilderAndThen(creationActions: => Actions) {
+  class BehaviorBuilderAndThen(creationActions: => Handlers) {
 
     /**
       * Adds entity actions for post-construction phase.
@@ -62,7 +63,7 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
       *
       * Based on the observation that State => Actions can be lifted to Some[State] => Actions (see bellow)
       */
-    def andThen(updateActions: StateToActions): Behavior = { // <- Behavior == PartialFunction[Option[State], Actions]
+    def andThen(updateActions: StateToHandlers): Behavior = { // <- Behavior == PartialFunction[Option[State], Actions]
 
       // when None, we need to create it
       case None => creationActions
@@ -75,30 +76,76 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
 
   def Behavior = BehaviorBuilderFirst
 
-  case class Actions(commandHandlers: CommandToEffect, eventHandlers: EventHandler) {
+  sealed trait HandlersT
 
-    def onCommand[C <: Command](effect: Effect[C]): Actions = {
+  final case class Handlers(commandHandlers: CommandToEffect = PartialFunction.empty,
+                            eventHandlers: EventHandler = PartialFunction.empty) extends HandlersT {
+
+    def and(handlers: HandlersT) = {
+
+      handlers match {
+        case cmd: CommandHandlers =>
+          copy(commandHandlers = this.commandHandlers.orElse(cmd.commandHandlers))
+        case evt: EventHandlers =>
+          copy(eventHandlers = this.eventHandlers.orElse(evt.eventHandlers))
+        case comb: Handlers =>
+          copy(
+            commandHandlers = this.commandHandlers.orElse(comb.commandHandlers),
+            eventHandlers = this.eventHandlers.orElse(comb.eventHandlers)
+          )
+      }
+    }
+  }
+
+  def onCommand[C <: Command](effect: Effect[C]): CommandHandlers = CommandHandlers(effect.toCommandHandler)
+
+  case class CommandHandlers(commandHandlers: CommandToEffect) extends HandlersT {
+    def onCommand[C <: Command](effect: Effect[C]): CommandHandlers =
       copy(commandHandlers = commandHandlers.orElse(effect.toCommandHandler))
+
+    def and(handlers: HandlersT): Handlers = {
+
+      handlers match {
+        case cmd: CommandHandlers =>
+          Handlers(commandHandlers = this.commandHandlers.orElse(cmd.commandHandlers))
+
+        case evt: EventHandlers =>
+          Handlers(
+            commandHandlers = this.commandHandlers,
+            eventHandlers = evt.eventHandlers
+          )
+
+        case comb: Handlers =>
+          comb.copy(commandHandlers = this.commandHandlers.orElse(comb.commandHandlers))
+      }
     }
 
-    def onEvent(eventHandler: EventHandler) = {
+  }
+
+  def onEvent(eventHandler: EventHandler): EventHandlers = EventHandlers(eventHandler)
+
+  case class EventHandlers(eventHandlers: EventHandler) extends HandlersT {
+
+    def onEvent(eventHandler: EventHandler): EventHandlers =
       copy(eventHandlers = eventHandlers.orElse(eventHandler))
-    }
 
-    def orElse(a: Actions) = {
-      copy(
-        commandHandlers = this.commandHandlers.orElse(a.commandHandlers),
-        eventHandlers = this.eventHandlers.orElse(a.eventHandlers)
-      )
+    def and(handlers: HandlersT): Handlers = {
+
+      handlers match {
+        case cmd: CommandHandlers =>
+          Handlers(
+            commandHandlers = cmd.commandHandlers,
+            eventHandlers = this.eventHandlers
+          )
+
+        case evt: EventHandlers =>
+          Handlers(eventHandlers = this.eventHandlers.orElse(evt.eventHandlers))
+
+        case comb: Handlers =>
+          comb.copy(eventHandlers = this.eventHandlers.orElse(comb.eventHandlers))
+      }
     }
   }
-
-
-  object Actions {
-    def apply(): Actions = Actions(commandHandlers = PartialFunction.empty, eventHandlers = PartialFunction.empty)
-  }
-
-  def actions = Actions()
 
   case class Effect[C <: WithReply](
                                      handler: PartialFunction[Command, Try[immutable.Seq[Event]]],
@@ -128,7 +175,7 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
 
       // NoOps handler won't ever emit events
       val noOpsHandler: PartialFunction[C, Try[immutable.Seq[Event]]] = {
-        case cmd => Try(immutable.Seq.empty)
+        case _ => Try(immutable.Seq.empty)
       }
 
       EffectBuilderAll(noOpsHandler).replyWith(reply)
@@ -171,11 +218,11 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
       // lift handler from Option[Event] to Seq[Event]
       val liftedHandler: PartialFunction[C, Try[immutable.Seq[Event]]] = {
         case cmd if handler.isDefinedAt(cmd) =>
-            Try {
-              handler(cmd) // from Option to Seq
-                .map(e => immutable.Seq(e))
-                .getOrElse(immutable.Seq.empty)
-            }
+          Try {
+            handler(cmd) // from Option to Seq
+              .map(e => immutable.Seq(e))
+              .getOrElse(immutable.Seq.empty)
+          }
       }
 
       // lift callbacks from Option[Event] to Seq[Event]
@@ -205,7 +252,7 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
       val handlerCmd: CommandHandler = {
         case cmd
           if target.runtimeClass == cmd.getClass &&
-             handler.isDefinedAt(cmd.asInstanceOf[C]) => handler(cmd.asInstanceOf[C])
+            handler.isDefinedAt(cmd.asInstanceOf[C]) => handler(cmd.asInstanceOf[C])
       }
 
       Effect(
@@ -215,8 +262,6 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
       )
     }
   }
-
-
 
 
   object ReadOnly {
@@ -242,25 +287,31 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
         case cmd if handler.isDefinedAt(cmd) => Try(handler(cmd))
       }
 
-    object attempt {
-
-      def persistOne(handler: PartialFunction[C, Try[Event]]): EffectBuilderOne[C] =
-        EffectBuilderOne[C](handler)
-
-      def persistAll(handler: PartialFunction[C, Try[immutable.Seq[Event]]]): EffectBuilderAll[C] =
-        EffectBuilderAll[C](handler)
-
-    }
-
-    object optionally {
-      def persistOne(handler: PartialFunction[C, Option[Event]]): EffectBuilderAll[C] =
-        EffectBuilderAll[C] {
-          // lifted PartialFunction
-          case cmd if handler.isDefinedAt(cmd) => Try(handler(cmd).toList)
-        }
-    }
-
   }
 
 
+  object TryHandler {
+    def apply[C <: Command : ClassTag]: TryHandlerSyntax[C] =
+      new TryHandlerSyntax[C]
+  }
+
+  class TryHandlerSyntax[C <: WithReply : ClassTag] {
+
+    def persistOne(handler: PartialFunction[C, Try[Event]]): EffectBuilderOne[C] =
+      EffectBuilderOne[C](handler)
+
+    def persistAll(handler: PartialFunction[C, Try[immutable.Seq[Event]]]): EffectBuilderAll[C] =
+      EffectBuilderAll[C](handler)
+  }
+
+  object OptionHandler {
+    def apply[C <: Command : ClassTag]: OptionHandlerSyntax[C] =
+      new OptionHandlerSyntax[C]
+  }
+
+  class OptionHandlerSyntax[C <: WithReply : ClassTag] {
+
+    def persistOne(handler: PartialFunction[C, Option[Event]]): EffectBuilderOptionOne[C] =
+      EffectBuilderOptionOne[C](handler)
+  }
 }
