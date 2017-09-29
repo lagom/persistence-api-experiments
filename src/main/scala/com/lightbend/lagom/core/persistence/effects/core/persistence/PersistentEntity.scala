@@ -1,5 +1,6 @@
 package com.lightbend.lagom.core.persistence.effects.core.persistence
 
+import com.lightbend.lagom.account.model.Account
 import com.lightbend.lagom.core.persistence.effects.core.persistence.PersistentEntity.{ReplyType, WithReply}
 import com.sun.net.httpserver.Authenticator.Failure
 
@@ -41,6 +42,9 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
 
 
   object BehaviorBuilderFirst {
+    def initialState(state: State) =
+      new BehaviorBuilderAndThenWithState(state)
+
 
     /**
       * Adds StateToActions for construction phase.
@@ -69,9 +73,27 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
       case None => creationActions
 
       // when Some, we use actions that update the model
-      case Some(aggregate) if updateActions.isDefinedAt(aggregate) => updateActions(aggregate)
+      case Some(state) if updateActions.isDefinedAt(state) => updateActions(state)
     }
 
+  }
+
+  class BehaviorBuilderAndThenWithState(initialState: State) {
+
+    /**
+      * Adds entity actions for post-construction phase.
+      *
+      * This method receives a [[PartialFunction]] from State to Actions.
+      */
+    def handlers(updateActions: StateToHandlers): Behavior = {
+
+      // when None, we need to create it
+      case None if updateActions.isDefinedAt(initialState) => updateActions(initialState)
+
+      // when Some, we use actions that update the model
+      case Some(state) if updateActions.isDefinedAt(state) => updateActions(state)
+
+    }
   }
 
   def Behavior = BehaviorBuilderFirst
