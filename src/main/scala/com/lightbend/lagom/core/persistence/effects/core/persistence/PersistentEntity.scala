@@ -236,7 +236,7 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
       val reverseSideEffectCallbacks = andThenCallbacks.reverse
 
       val andThanCallBack: (C, State, immutable.Seq[Event], Context) => Unit =
-        (command, st, evts, ctx) => {
+        (cmd, st, evts, ctx) => {
           Try(reverseSideEffectCallbacks.foreach(f => f(evts, st)))
           ctx.reply(reply(st))
         }
@@ -264,8 +264,34 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
 
   }
 
+  case class RejectBuilder[C: ClassTag](andThenCallbacks: List[State => Unit] = List.empty) {
+      
+      def andThen(andThenCallback: (State) => Unit): RejectBuilder[C] =
+        copy(andThenCallbacks = andThenCallback :: andThenCallbacks)    
+        
+      def withFailure(reply: (C, State) => Throwable) = {
+        
+        val reverseSideEffectCallbacks = andThenCallbacks.reverse
+
+        val andThanCallBack: (C, State, immutable.Seq[Event], Context) => Unit =
+          (cmd, st, evts, ctx) => {
+            Try(reverseSideEffectCallbacks.foreach(f => f(st)))
+            ctx.reply(reply(cmd, st))
+          }
+          
+        Effect(
+          handler = PartialFunction.empty,
+          andThenCallback = andThanCallBack
+        )   
+      }                   
+  }
+
   object ReadOnly {
     def apply[C <: Command : ClassTag]: ReadOnlyBuilder[C] = new ReadOnlyBuilder[C]()
+  }
+  
+  object Reject {
+    def apply[C <: Command : ClassTag]: RejectBuilder[C] = new RejectBuilder[C]()
   }
 
   object Handler {
