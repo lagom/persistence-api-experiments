@@ -26,8 +26,12 @@ object PersistentEntity {
   }
 
 }
+trait Context {
+  def reply[A](value: A): Unit
+}
 
 abstract class PersistentEntity[Command <: WithReply, Event, State] {
+
 
   type Behavior = PartialFunction[Option[State], Handlers]
 
@@ -119,7 +123,8 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
     }
   }
 
-  def onCommand[C <: Command](effect: Effect[C]): CommandHandlers = CommandHandlers(effect.toCommandHandler)
+  def onCommand[C <: Command](effect: Effect[C]): CommandHandlers =
+    CommandHandlers(effect.toCommandHandler)
 
   case class CommandHandlers(commandHandlers: CommandToEffect) extends HandlersT {
     def onCommand[C <: Command](effect: Effect[C]): CommandHandlers =
@@ -169,17 +174,14 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
     }
   }
 
-  case class Effect[C <: WithReply](
-                                     handler: PartialFunction[Command, Try[immutable.Seq[Event]]],
-                                     andThenCallbacks: List[(immutable.Seq[Event], State) => Unit] = List.empty,
-                                     replyWith: State => C#Reply) {
+  case class Effect[C](handler: PartialFunction[Command, Try[immutable.Seq[Event]]],
+                       andThenCallback: (immutable.Seq[Event], State, Context) => Unit) {
     def toCommandHandler: CommandToEffect = {
       case cmd if handler.isDefinedAt(cmd) => this.asInstanceOf[Effect[Command]]
     }
   }
 
   object Effect {
-
     implicit def builderToEffectDone[C <: ReplyType[Done]](replyable: Replyable[C]) =
       replyable.replyWith(_ => Done)
 
@@ -277,10 +279,17 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
             handler.isDefinedAt(cmd.asInstanceOf[C]) => handler(cmd.asInstanceOf[C])
       }
 
+      val reverseSideEffectCallbacks = andThenCallbacks.reverse
+
+      val andThanCallBack: (immutable.Seq[Event], State, Context) => Unit =
+        (evts, st, ctx) => {
+          Try(reverseSideEffectCallbacks.foreach(f => f(evts, st)))
+          ctx.reply(reply(st))
+        }
+
       Effect(
         handler = handlerCmd,
-        andThenCallbacks = andThenCallbacks.reverse,
-        replyWith = reply
+        andThenCallback = andThanCallBack
       )
     }
   }

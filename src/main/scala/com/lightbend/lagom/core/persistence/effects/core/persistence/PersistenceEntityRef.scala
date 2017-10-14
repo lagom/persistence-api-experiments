@@ -1,9 +1,9 @@
 package com.lightbend.lagom.core.persistence.effects.core.persistence
 
 import com.lightbend.lagom.core.persistence.effects.core.persistence.PersistentEntity.WithReply
-
-import scala.concurrent.Future
-import scala.util.{Failure, Success}
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.{Future, Promise}
+import scala.util.{Failure, Success, Try}
 
 /**
   * This is a dummy  PersistenceEntityRef. It's not backed by an Actor.
@@ -37,20 +37,27 @@ class PersistenceEntityRef[C <: WithReply, Event, State](entity: PersistentEntit
 
     // at that point we should persist the events
 
+    class ReplyContext extends Context {
+      val promise =  Promise[Any]()
+      val future = promise.future
+      override def reply[A](value: A): Unit = promise.complete(Try(value))
+
+    }
+
+    val replyContext = new ReplyContext
+
     // once events persisted, we loop over the callbacks using the updated state.
     // This must be protected, any failure must be ignored, but logged. That's a best effort.
     triedEvents match {
       case Success(events) =>
-        // after persisting, run the fallbacks
-        effect
-          .andThenCallbacks.foreach { func =>
-          stateOpt.foreach( state => func(events, state) )
-        }
+        // after persisting, run the callbacks
+        stateOpt.foreach(state => effect.andThenCallback(events, state, replyContext))
+
       case _ => () // no call in case of failure
     }
 
     // once all done, reply using state
     //NOTE: this can only fail if a ReadOnly command is run before creating the entity
-    Future.successful(effect.replyWith(stateOpt.get))
+    replyContext.future.map(_.asInstanceOf[C#Reply])
   }
 }
