@@ -102,80 +102,34 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
 
   def Behavior = BehaviorBuilderFirst
 
-  sealed trait HandlersT
-
+  
   final case class Handlers(commandHandlers: CommandToEffect = PartialFunction.empty,
-                            eventHandlers: EventHandler = PartialFunction.empty) extends HandlersT {
+                            eventHandlers: EventHandler = PartialFunction.empty) {
 
-    def and(handlers: HandlersT) = {
-
-      handlers match {
-        case cmd: CommandHandlers =>
-          copy(commandHandlers = this.commandHandlers.orElse(cmd.commandHandlers))
-        case evt: EventHandlers =>
-          copy(eventHandlers = this.eventHandlers.orElse(evt.eventHandlers))
-        case comb: Handlers =>
-          copy(
-            commandHandlers = this.commandHandlers.orElse(comb.commandHandlers),
-            eventHandlers = this.eventHandlers.orElse(comb.eventHandlers)
-          )
-      }
-    }
-  }
-
-  def onCommand[C <: Command](effect: Effect[C]): CommandHandlers =
-    CommandHandlers(effect.toCommandHandler)
-
-  case class CommandHandlers(commandHandlers: CommandToEffect) extends HandlersT {
-    def onCommand[C <: Command](effect: Effect[C]): CommandHandlers =
+    def onCommand[C <: Command](effect: Effect[C]): Handlers =
       copy(commandHandlers = commandHandlers.orElse(effect.toCommandHandler))
+      
 
-    def and(handlers: HandlersT): Handlers = {
-
-      handlers match {
-        case cmd: CommandHandlers =>
-          Handlers(commandHandlers = this.commandHandlers.orElse(cmd.commandHandlers))
-
-        case evt: EventHandlers =>
-          Handlers(
-            commandHandlers = this.commandHandlers,
-            eventHandlers = evt.eventHandlers
-          )
-
-        case comb: Handlers =>
-          comb.copy(commandHandlers = this.commandHandlers.orElse(comb.commandHandlers))
-      }
-    }
-
-  }
-
-  def onEvent(eventHandler: EventHandler): EventHandlers = EventHandlers(eventHandler)
-
-  case class EventHandlers(eventHandlers: EventHandler) extends HandlersT {
-
-    def onEvent(eventHandler: EventHandler): EventHandlers =
+    def onEvent(eventHandler: EventHandler): Handlers =
       copy(eventHandlers = eventHandlers.orElse(eventHandler))
-
-    def and(handlers: HandlersT): Handlers = {
-
-      handlers match {
-        case cmd: CommandHandlers =>
-          Handlers(
-            commandHandlers = cmd.commandHandlers,
-            eventHandlers = this.eventHandlers
-          )
-
-        case evt: EventHandlers =>
-          Handlers(eventHandlers = this.eventHandlers.orElse(evt.eventHandlers))
-
-        case comb: Handlers =>
-          comb.copy(eventHandlers = this.eventHandlers.orElse(comb.eventHandlers))
-      }
+              
+    def and(handlers: Handlers) = {
+      copy(
+        commandHandlers = this.commandHandlers.orElse(handlers.commandHandlers),
+        eventHandlers = this.eventHandlers.orElse(handlers.eventHandlers)
+      )
     }
   }
+  
+  def onCommand[C <: Command](effect: Effect[C]): Handlers =
+    Handlers(commandHandlers = effect.toCommandHandler)
+
+  
+  def onEvent(eventHandler: EventHandler): Handlers = 
+    Handlers( eventHandlers = eventHandler)
 
   case class Effect[C](handler: PartialFunction[Command, Try[immutable.Seq[Event]]],
-                       andThenCallback: (immutable.Seq[Event], State, Context) => Unit) {
+                       andThenCallback: (C, State, immutable.Seq[Event], Context) => Unit) {
     def toCommandHandler: CommandToEffect = {
       case cmd if handler.isDefinedAt(cmd) => this.asInstanceOf[Effect[Command]]
     }
@@ -281,11 +235,12 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
 
       val reverseSideEffectCallbacks = andThenCallbacks.reverse
 
-      val andThanCallBack: (immutable.Seq[Event], State, Context) => Unit =
-        (evts, st, ctx) => {
+      val andThanCallBack: (C, State, immutable.Seq[Event], Context) => Unit =
+        (command, st, evts, ctx) => {
           Try(reverseSideEffectCallbacks.foreach(f => f(evts, st)))
           ctx.reply(reply(st))
         }
+
 
       Effect(
         handler = handlerCmd,
@@ -294,9 +249,23 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
     }
   }
 
+  class ReadOnlyBuilder[C <: WithReply : ClassTag] {
+
+    def replyWith(reply: (C, State) => C#Reply): Effect[C] = {
+
+      val andThanCallBack: (C, State, immutable.Seq[Event], Context) => Unit =
+        (cmd, st, evts, ctx) => ctx.reply(reply(cmd, st))
+
+      Effect(
+        handler = PartialFunction.empty,
+        andThenCallback = andThanCallBack
+      )
+    }
+
+  }
 
   object ReadOnly {
-    def apply[C <: Command : ClassTag]: EffectBuilderNone[C] = new EffectBuilderNone[C]()
+    def apply[C <: Command : ClassTag]: ReadOnlyBuilder[C] = new ReadOnlyBuilder[C]()
   }
 
   object Handler {

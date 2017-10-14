@@ -5,7 +5,7 @@ import com.lightbend.lagom.core.persistence.effects.core.persistence.PersistentE
 trait BaseAccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent, Account] {
 
   // on creation and later
-  val depositCommandHandlers: CommandHandlers =
+  val depositCommandHandlers =
     onCommand {
       // this is directive builder that expects one single Event
       Handler[Deposit]
@@ -19,7 +19,7 @@ trait BaseAccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent
         .replyWith(_.amount)
     }
 
-  def withdrawCommandHandlers(account: Account): CommandHandlers =
+  def withdrawCommandHandlers(account: Account) =
     onCommand {
       TryHandler[Withdraw]
         .persistOne { // <- this Effect builder expects a Try[Event]
@@ -38,23 +38,21 @@ trait BaseAccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent
     * behind the scenes, this is a regular Effect with a NoOps command handler.
     * It doesn't have callbacks neither, but do have a reply.
     */
-  val readOnlyCommandHandlers: CommandHandlers =
+  val readOnlyCommandHandlers =
     onCommand {
-      ReadOnly[GetBalance.type].replyWith(_.amount)
+      ReadOnly[GetBalance.type].replyWith((_, st) => st.amount)
     }
       .onCommand {
-        // there is also an implicit for reply with State
-        // but intellij gives an error hence the explicit call here
-        ReadOnly[GetState.type].replyWith(identity)
+        ReadOnly[GetState.type].replyWith((_, st) => st)
       }
 
-  val atCreationEventsHandlers: EventHandlers =
+  val atCreationEventsHandlers =
     onEvent {
       // at creation time, first DepositExecuted initialises the account
       case evt: DepositExecuted => Account(evt.amount)
     }
 
-  def afterCreationEventsHandlers(account: Account): EventHandlers =
+  def afterCreationEventsHandlers(account: Account) =
     onEvent {
       case evt: DepositExecuted => account.copy(amount = account.amount + evt.amount)
       case evt: WithdrawExecuted => account.copy(amount = account.amount - evt.amount)

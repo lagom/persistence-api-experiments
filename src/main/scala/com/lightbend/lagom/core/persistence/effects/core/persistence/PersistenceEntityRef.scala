@@ -21,6 +21,10 @@ class PersistenceEntityRef[C <: WithReply, Event, State](entity: PersistentEntit
     // find the Effect that were registered for the passed Command
     val effect = actions.commandHandlers.apply(cmd).asInstanceOf[entity.Effect[CC]]
 
+    /*
+      val triedEvents = effectCxt(cmd).events
+      val callbacks = effectCxt(cmd).callbacks
+    */
     // emit events
     val triedEvents = effect.handler(cmd)
 
@@ -51,7 +55,7 @@ class PersistenceEntityRef[C <: WithReply, Event, State](entity: PersistentEntit
     triedEvents match {
       case Success(events) =>
         // after persisting, run the callbacks
-        stateOpt.foreach(state => effect.andThenCallback(events, state, replyContext))
+        stateOpt.foreach(state => effect.andThenCallback(cmd, state,  events, replyContext))
 
       case _ => () // no call in case of failure
     }
