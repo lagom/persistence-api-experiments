@@ -10,7 +10,7 @@ trait BaseAccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent
       // this is directive builder that expects one single Event
       Handler[Deposit]
         .persistOne {
-          case cmd => DepositExecuted(cmd.amount)
+          case Deposit(amount) => DepositExecuted(amount)
         }
         .andThen { (evt, state) =>
           println(s"Deposit ${evt.amount}, current balance is ${state.amount}")
@@ -23,9 +23,9 @@ trait BaseAccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent
     onCommand {
       TryHandler[Withdraw]
         .persistOne { // <- this Effect builder expects a Try[Event]
-          case cmd =>
+          case Withdraw(amount) =>
             account
-              .validateWithdraw(cmd.amount) // <- this method returns a Try[Double]
+              .validateWithdraw(amount) // <- this method returns a Try[Double]
               .map(WithdrawExecuted)
         }
       // NOTE: we don't need reply because Withdraw replies with Done
