@@ -38,12 +38,12 @@ trait BaseAccountEntity extends PersistentEntity[AccountCommand[_], AccountEvent
     * behind the scenes, this is a regular Effect with a NoOps command handler.
     * It doesn't have callbacks neither, but do have a reply.
     */
-  val readOnlyCommandHandlers =
+  def readOnlyCommandHandlers(account: Account) =
     onCommand {
-      ReadOnly[GetBalance.type].replyWith((_, st) => st.amount)
+      ReadOnly[GetBalance.type].replyWith(_ => account.amount)
     }
       .onCommand {
-        ReadOnly[GetState.type].replyWith((_, st) => st)
+        ReadOnly[GetState.type].replyWith(_ => account)
       }
 
   val atCreationEventsHandlers =

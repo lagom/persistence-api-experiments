@@ -120,7 +120,10 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
       )
     }
   }
-  
+
+  object Handlers {
+    def empty = Handlers()
+  }
   def onCommand[C <: Command](effect: Effect[C]): Handlers =
     Handlers(commandHandlers = effect.toCommandHandler)
 
@@ -251,10 +254,10 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
 
   class ReadOnlyBuilder[C <: WithReply : ClassTag] {
 
-    def replyWith(reply: (C, State) => C#Reply): Effect[C] = {
+    def replyWith(reply: (C) => C#Reply): Effect[C] = {
 
       val andThanCallBack: (C, State, immutable.Seq[Event], Context) => Unit =
-        (cmd, st, evts, ctx) => ctx.reply(reply(cmd, st))
+        (cmd, st, evts, ctx) => ctx.reply(reply(cmd))
 
       Effect(
         handler = PartialFunction.empty,
@@ -297,6 +300,13 @@ abstract class PersistentEntity[Command <: WithReply, Event, State] {
   object Handler {
     def apply[C <: Command : ClassTag]: HandlerSyntax[C] =
       new HandlerSyntax[C]
+  }
+
+  object Ignore {
+    def apply[C <: Command : ClassTag]: EffectBuilderOptionOne[C] =
+      EffectBuilderOptionOne[C] {
+        case cmd => None
+      }
   }
 
   class HandlerSyntax[C <: WithReply : ClassTag] {

@@ -29,7 +29,7 @@ class AccountEntity extends BaseAccountEntity {
         // here come the actions that are valid when Account
         // is already created
         case account =>
-          readOnlyCommandHandlers and
+          readOnlyCommandHandlers(account) and
             withdrawCommandHandlers(account) and
             depositCommandHandlers and
             afterCreationEventsHandlers(account)
