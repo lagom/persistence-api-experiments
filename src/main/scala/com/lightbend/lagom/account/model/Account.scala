@@ -6,26 +6,20 @@ import com.lightbend.lagom.core.persistence.effects.core.persistence.PersistentE
 import scala.util.{Failure, Success, Try}
 
 
-case class Account(amount: Double) {
+sealed trait Account
 
-  def validateWithdraw(withdrawAmount: Double): Try[Double] = {
-    if (amount - withdrawAmount >= 0)
-      Success(withdrawAmount)
-    else
-      Failure(new RuntimeException("Insufficient balance"))
-  }
-
-}
+case class OpenedAccount(amount: Double)
+case object ClosedAccount
 
 sealed trait AccountCommand[R] extends ReplyType[R]
 
-case class Deposit(amount: Double) extends AccountCommand[Double]
+case class Deposit(amount: Double) extends AccountCommand[Unit]
 
-case class Withdraw(amount: Double) extends AccountCommand[Done]
+case class Withdraw(amount: Double) extends AccountCommand[Unit]
 
-case object GetBalance extends AccountCommand[Double]
+case object GetBalance extends AccountCommand[Unit]
 
-case object GetState extends AccountCommand[Account]
+case object GetState extends AccountCommand[Unit]
 
 
 sealed trait AccountEvent {
