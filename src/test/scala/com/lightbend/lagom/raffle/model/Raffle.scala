@@ -72,14 +72,12 @@ case class NonEmptyRaffle(participants: List[String]) extends Raffle {
   val acceptParticipants =
     actions
       .onCommand[AddParticipant] {
-
         // reject double booking
         case AddParticipant(name) if hasParticipant(name) =>
           Effect.reject(s"""Participant $name already added!""" )
 
         case AddParticipant(name) =>
           Effect.persist(ParticipantAdded(name))
-
       }
       .onEvent {
         case ParticipantAdded(name) => copy(participants = participants :+ name)
