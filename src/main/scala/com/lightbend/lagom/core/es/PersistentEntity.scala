@@ -42,9 +42,9 @@ abstract class PersistentEntity {
   type Command  <: WithReply
   type Event
 
-  type Behavior = PartialFunction[Option[State], Handlers]
+  type Behavior = PartialFunction[Option[State], Actions]
 
-  type StateToHandlers = PartialFunction[State, Handlers]
+  type StateToActions = PartialFunction[State, Actions]
   type CommandHandler = PartialFunction[CommandEnvelop[_, _], Effect[Event, State]]
   type CommandHandlerTyped[C <: Command] = PartialFunction[CommandEnvelop[C, C#ReplyType], Effect[Event, State]]
   type EventHandler = PartialFunction[Event, State]
@@ -56,15 +56,15 @@ abstract class PersistentEntity {
   def Behavior = BehaviorBuilderFirst
 
 
-  final case class Handlers(private val commandHandlers: CommandHandler = PartialFunction.empty,
-                            private val eventHandlers: EventHandler = PartialFunction.empty) {
+  final case class Actions(private val commandHandlers: CommandHandler = PartialFunction.empty,
+                           private val eventHandlers: EventHandler = PartialFunction.empty) {
 
     def applyCommand[C <: Command](cmd: CommandEnvelop[C, C#ReplyType]): Effect[Event, State] =
       commandHandlers(cmd)
 
     def applyEvent(evt: Event): State = eventHandlers(evt)
 
-    def onCommand[C <: Command](handler: PartialFunction[C, EffectBuilder[C#ReplyType]])(implicit targetCmd: ClassTag[C]): Handlers = {
+    def onCommand[C <: Command](handler: PartialFunction[C, EffectBuilder[C#ReplyType]])(implicit targetCmd: ClassTag[C]): Actions = {
 
       val commandHandler: CommandHandlerTyped[C] = {
         case CommandEnvelop(_, cmd, replyTo)
@@ -90,7 +90,7 @@ abstract class PersistentEntity {
       * Declare a command to be rejected.
       * A rejected command won't be processed and the passed throwable will be used to signaling the failure.
       */
-    def rejectCommand[C <: Command](throwable: => Throwable)(implicit targetCmd: ClassTag[C]): Handlers = {
+    def rejectCommand[C <: Command](throwable: => Throwable)(implicit targetCmd: ClassTag[C]): Actions = {
       val commandHandler: CommandHandlerTyped[C] = {
         case CommandEnvelop(_, cmd, replyTo)
           if cmd.getClass == targetCmd.runtimeClass =>
@@ -101,11 +101,22 @@ abstract class PersistentEntity {
       copy(commandHandlers = commandHandlers.orElse(commandHandler.asInstanceOf[CommandHandler]))
     }
 
-    def onEvent(eventHandler: EventHandler): Handlers =
+
+    def rejectAll(throwable: => Throwable): Actions = {
+      val commandHandler: CommandHandlerTyped[Command] = {
+        case CommandEnvelop(_, _, replyTo) =>
+          PersistentActor
+            .PersistNothing[Event, State]()
+            .andThen(_ => replyTo ! Left(throwable))
+      }
+      copy(commandHandlers = commandHandlers.orElse(commandHandler.asInstanceOf[CommandHandler]))
+    }
+
+    def onEvent(eventHandler: EventHandler): Actions =
       copy(eventHandlers = eventHandlers.orElse(eventHandler))
 
-    /** Concatenate this handler with the passed [[Handlers]] */
-    def and(handlers: Handlers) = {
+    /** Concatenate this handler with the passed [[Actions]] */
+    def and(handlers: Actions) = {
       copy(
         commandHandlers = this.commandHandlers.orElse(handlers.commandHandlers),
         eventHandlers = this.eventHandlers.orElse(handlers.eventHandlers)
@@ -113,10 +124,10 @@ abstract class PersistentEntity {
     }
   }
 
-  def handlers = Handlers()
+  def actions = Actions()
 
-  object Handlers {
-    def empty = Handlers()
+  object Actions {
+    def empty = Actions()
   }
 
 
@@ -178,6 +189,9 @@ abstract class PersistentEntity {
     def persist(event: Event, events: Event*): EffectBuilderStage =
       EffectBuilderStage(im.Seq(event) ++ events)
 
+    def persist(events: im.Seq[Event]): EffectBuilderStage =
+      EffectBuilderStage(events)
+
     def persist(eventOpt: Option[Event]): EffectBuilderStage =
       EffectBuilderStage(eventOpt.toIndexedSeq)
 
@@ -208,18 +222,18 @@ abstract class PersistentEntity {
       * In construction phase we must declare the Command(s) that will trigger the
       * first event that will fill the constructor of the entity state.
       */
-    def create(creationActions: => Handlers) =
+    def create(creationActions: => Actions) =
       new BehaviorBuilderAndThen(creationActions)
   }
 
-  class BehaviorBuilderAndThen(creationHandlers: => Handlers) {
+  class BehaviorBuilderAndThen(creationHandlers: => Actions) {
 
     /**
-      * Adds handlers for post-construction phase.
+      * Adds actions for post-construction phase.
       *
-      * This method receives a [[PartialFunction]] from State to Handlers.
+      * This method receives a [[PartialFunction]] from State to Actions.
       */
-    def update(updateHandlers: StateToHandlers): Behavior = {
+    def update(updateHandlers: StateToActions): Behavior = {
 
       // when None, we need to create it
       case None => creationHandlers
@@ -233,11 +247,11 @@ abstract class PersistentEntity {
   class BehaviorBuilderAndThenWithState(initialState: State) {
 
     /**
-      * Adds handlers for post-construction phase.
+      * Adds actions for post-construction phase.
       *
-      * This method receives a [[PartialFunction]] from State to Handlers.
+      * This method receives a [[PartialFunction]] from State to Actions.
       */
-    def update(updateHandlers: StateToHandlers): Behavior = {
+    def update(updateHandlers: StateToActions): Behavior = {
 
       // when None, use initial state
       case None if updateHandlers.isDefinedAt(initialState) => updateHandlers(initialState)

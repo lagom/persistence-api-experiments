@@ -14,7 +14,7 @@ case class Account(amount: Double) {
     amount - withdrawAmount >= 0
 
   val readOnlyCommandHandlers = {
-    handlers
+    actions
       .onCommand[GetBalance.type] {
         case _ => ReplyWith(_.amount)
       }
@@ -24,13 +24,13 @@ case class Account(amount: Double) {
   }
 
   val eventHandlers =
-    handlers.onEvent {
+    actions.onEvent {
       case Deposited(txAmount) => copy(amount = amount +  txAmount)
       case Withdrawn(txAmount) => copy(amount = amount -  txAmount)
     }
 
   val withdrawCommandHandler =
-    handlers
+    actions
       .onCommand[Withdraw] {
         case Withdraw(txAmount) if validWithdraw(txAmount) =>
           Effect
@@ -51,7 +51,7 @@ object Account extends PersistentEntity {
   type Event = AccountEvent
 
   private val depositCommandHandlers =
-    handlers
+    actions
       .onCommand[Deposit] {
         case Deposit(amount) =>
           Effect
@@ -64,7 +64,7 @@ object Account extends PersistentEntity {
       .rejectCommand[Withdraw](new RuntimeException("Not a valid command"))
 
   private val depositOnCreation =
-    handlers
+    actions
       .onEvent {
         // creates the account after first deposit
         case Deposited(amount) => Account(amount)

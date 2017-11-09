@@ -5,7 +5,7 @@ The original motivation for reviewing the current API comes from feedback we got
 
 This current proposal has a few new features and/or advantages over the current API. 
 
-1. `Behavior` is a function from `Option[State] => Handlers`
+1. `Behavior` is a function from `Option[State] => Actions`
 2. No explicit initial value needed. Initial value of a model is always None. We don't need to force users to come up with a definition of empty. For legacy reasons, we may need to provide the means for defining an initial state.
 3. Command handlers have only one argument, the `Command`. No `Context` or `State` passed around. `Context` become obsolete and `State` is available in scope by other means (see bellow).
 4. `Effect` is the new black. A command handler is a function from `Command => Effect[Command]` and we provide a `EffectBuilder` DSL for different types. At the moment we have support for `Effects` emitting: `Event`, `Seq[Event]`, `Option[Event]`, `Try[Event]` and `Try[Seq[Event]]`. 
@@ -13,16 +13,16 @@ This current proposal has a few new features and/or advantages over the current 
 
 Please, feel free to open issues to make suggestions and discuss any topic in detail.
 
-## Behavior as Option[State] => Handlers
-This is a important change that aleviates the API in many places and removes the need to come up with an artificial initial state. 
+## Behavior as Option[State] => Actions
+This is a important change that alleviates the API in many places and removes the need to come up with an artificial initial state.
 
 The main observation backing this change is that at the beginning there isn't an `Entity` and like any other event that may take place, there is an initial event that creates the `Entity`, much like we are used to create an object by calling its constructor. At some moment an `Entity` is created and the creation is expressed as an `Event`.
 
 The `Behavior` can be decomposed in two main functions.
-* `None => Handlers` when the `Entity` doesn't exists yet. At API level this is a `() => Handlers`
-* `Some[State] => Handlers` when the `Entity` was already created.  At API level this is a `PartialFunction[State, Handlers]`
+* `None => Actions` when the `Entity` doesn't exists yet. At API level this is a `() => Actions`
+* `Some[State] => Actions` when the `Entity` was already created.  At API level this is a `PartialFunction[State, Actions]`
 
-At API level, the developers doesn't need to deal with `Option`. They only need to provide the Handlers before and after creation. This will also allow the usage of ADTs to express model transition. 
+At API level, the developers doesn't need to deal with `Option`. They only need to provide the Actions before and after creation. This will also allow the usage of ADTs to express model transition.
 
 ## Simplified Command Handlers
 The current API (Lagom 1.3.8) defines a command handler as a `PartialFunction[(Command, CommandContext[Reply], State), Persist]`. In this new API it is simplified to `PartialFunction[Command, Effect[Command]]`. 
@@ -37,10 +37,10 @@ As mentioned before, the `Behavior` is defined as two functions pre-construction
 
 ```scala
 Behavior
-  .first {  // () => Handlers equivalent to None => Handlers
+  .first {  // () => Actions equivalent to None => Actions
     depositCommandHandlers and atCreationEvents
   }
-  .andThen { // PartialFunction[State, Handlers] equivalent to Some[State] => Handlers
+  .andThen { // PartialFunction[State, Actions] equivalent to Some[State] => Actions
     case account => // Account is a single type, but it could be an ADT 
       readOnlyCommands and
         withdrawCommandHandlers(account) and
@@ -49,7 +49,7 @@ Behavior
   }
 ```
 
-We can defined `Handlers` and combine then using `and`. Note that not all `Handlers` need to have the `State` available in scope. `Withdraw` need it because we don't want to go bellow zero. `Events Handlers` do need the State. Read only `Command Handlers` don't need it passed, they will be made available on the `replyWith` method (see below).
+We can defined `Actions` and combine then using `and`. Note that not all `Actions` need to have the `State` available in scope. `Withdraw` need it because we don't want to go bellow zero. `Events Handlers` do need the State. Read only `Command Handlers` don't need it passed, they will be made available on the `replyWith` method (see below).
 
 ### Deposit Command Handler
 ```scala

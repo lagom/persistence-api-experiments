@@ -1,9 +1,10 @@
 package com.lightbend.lagom.hello.model
 
+import java.time.LocalDateTime
+
 import akka.Done
 import com.lightbend.lagom.core.es.PersistentEntity
 import com.lightbend.lagom.core.es.PersistentEntity.ReplyType
-import java.time.LocalDateTime
 
 case class Hello(message: String, timestamp: String)
 
@@ -14,7 +15,7 @@ object Hello extends PersistentEntity {
   type Event = HelloEvent
 
   def changeMessageCmd(state: Hello) =
-    handlers
+    actions
       .onCommand[UseGreetingMessage] {
         case cmd =>  Effect.persist(GreetingMessageChanged(cmd.message))
       }
@@ -23,7 +24,7 @@ object Hello extends PersistentEntity {
       }
 
   def eventHandler(state: Hello) =
-    handlers
+    actions
       .onEvent {
         case GreetingMessageChanged(msg) => Hello(message = msg, timestamp = LocalDateTime.now.toString)
       }
