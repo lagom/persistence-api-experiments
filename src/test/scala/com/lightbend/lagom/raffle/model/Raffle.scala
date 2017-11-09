@@ -30,7 +30,7 @@ object Raffle extends PersistentEntity {
             raffle.run
 
         case FinishedRaffle =>
-          actions.rejectAll(new IllegalAccessException("Raffle is already finished") )
+          FinishedRaffle.rejectAllCommands
       }
 }
 
@@ -44,7 +44,8 @@ case object EmptyRaffle extends Raffle {
   val acceptParticipants =
     actions
       .onCommand[AddParticipant] {
-        case AddParticipant(name) => Effect.persist(ParticipantAdded(name))
+        case AddParticipant(name) =>
+          Effect.persist(ParticipantAdded(name))
       }
       .onEvent {
         case ParticipantAdded(name) => NonEmptyRaffle(List(name))
@@ -52,14 +53,14 @@ case object EmptyRaffle extends Raffle {
 
   val canNotRunWithoutParticipants =
     actions
-        .rejectCommand[Run.type](new IllegalArgumentException("Raffle has no participants"))
+      .rejectCommand[Run.type]("Raffle has no participants")
 
   val ignoreRemovals =
     actions
       .onCommand[RemoveAllParticipants.type] {
         case _ => Effect.ignore
       }
-        .onCommand[RemoveParticipant] {
+      .onCommand[RemoveParticipant] {
         case _ => Effect.ignore
       }
 }
@@ -74,9 +75,10 @@ case class NonEmptyRaffle(participants: List[String]) extends Raffle {
 
         // reject double booking
         case AddParticipant(name) if hasParticipant(name) =>
-          Effect.reject(new IllegalArgumentException(s"""Participant $name already added!""") )
+          Effect.reject(s"""Participant $name already added!""" )
 
-        case AddParticipant(name) => Effect.persist(ParticipantAdded(name))
+        case AddParticipant(name) =>
+          Effect.persist(ParticipantAdded(name))
 
       }
       .onEvent {
@@ -88,20 +90,24 @@ case class NonEmptyRaffle(participants: List[String]) extends Raffle {
     actions
       .onCommand[RemoveParticipant] {
         case RemoveParticipant(name) =>
-          Effect.persist(participants.find(_ == name).map(ParticipantRemoved))
+          Effect.persist {
+            participants.find(_ == name).map(ParticipantRemoved)
+          }
       }
       .onCommand[RemoveAllParticipants.type] {
         case RemoveAllParticipants =>
-          Effect.persist(participants.map(ParticipantRemoved))
+          Effect.persist {
+            participants.map(ParticipantRemoved)
+          }
       }
       .onEvent {
         case ParticipantRemoved(name) =>
-          val newParticipants = participants.filter(_ != name)
+          val remaining = participants.filter(_ != name)
           // NOTE: if last participant is removed, transition back to EmptyRaffle
-          if (newParticipants.isEmpty)
+          if (remaining.isEmpty)
             EmptyRaffle
           else
-            copy(participants = newParticipants)
+            copy(participants = remaining)
       }
 
   val run =
@@ -118,7 +124,9 @@ case class NonEmptyRaffle(participants: List[String]) extends Raffle {
 
 }
 
-case object FinishedRaffle extends Raffle
+case object FinishedRaffle extends Raffle {
+  def rejectAllCommands = actions.rejectAll("Raffle is already finished")
+}
 
 sealed trait RaffleCommand extends ReplyType[Done]
 

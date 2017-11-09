@@ -11,8 +11,9 @@ import scala.concurrent.Future
 import scala.language.implicitConversions
 import scala.reflect.ClassTag
 import scala.util.{Failure, Success, Try}
-
 import akka.typed.scaladsl.AskPattern._
+
+import scala.util.control.NoStackTrace
 
 object PersistentEntity {
 
@@ -86,6 +87,9 @@ abstract class PersistentEntity {
       copy(commandHandlers = commandHandlers.orElse(commandHandler.asInstanceOf[CommandHandler]))
     }
 
+    def rejectCommand[C <: Command](message: String)(implicit targetCmd: ClassTag[C]): Actions =
+      rejectCommand(InvalidCommandException(message))
+
     /**
       * Declare a command to be rejected.
       * A rejected command won't be processed and the passed throwable will be used to signaling the failure.
@@ -101,6 +105,9 @@ abstract class PersistentEntity {
       copy(commandHandlers = commandHandlers.orElse(commandHandler.asInstanceOf[CommandHandler]))
     }
 
+
+    def rejectAll(message: String): Actions =
+      rejectAll(InvalidCommandException(message))
 
     def rejectAll(throwable: => Throwable): Actions = {
       val commandHandler: CommandHandlerTyped[Command] = {
@@ -197,6 +204,9 @@ abstract class PersistentEntity {
 
     def ignore: EffectBuilderStage = persist(None)
 
+    def reject(message: String): EffectBuilder[Nothing] =
+      reject(InvalidCommandException(message))
+
     def reject(throwable: Throwable): EffectBuilder[Nothing] =
       EffectBuilderStage(im.Seq.empty, List.empty)
         .replyWith(_ => throw throwable)
@@ -262,3 +272,5 @@ abstract class PersistentEntity {
     }
   }
 }
+
+case class InvalidCommandException(message: String) extends IllegalArgumentException(message) with NoStackTrace

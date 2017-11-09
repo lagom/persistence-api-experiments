@@ -40,7 +40,7 @@ case class Account(amount: Double) {
             }
         case _ =>
           Effect
-            .reject(new RuntimeException("Insufficient balance."))
+            .reject("Insufficient balance.")
       }
 }
 
@@ -61,7 +61,7 @@ object Account extends PersistentEntity {
             }
             .replyWith(_.amount)
       }
-      .rejectCommand[Withdraw](new RuntimeException("Not a valid command"))
+      .rejectCommand[Withdraw]("Not a valid command")
 
   private val depositOnCreation =
     actions
