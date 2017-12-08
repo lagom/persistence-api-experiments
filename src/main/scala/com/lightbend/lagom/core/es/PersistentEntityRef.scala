@@ -3,10 +3,11 @@ package com.lightbend.lagom.core.es
 import akka.actor.Scheduler
 import akka.typed.ActorRef
 import akka.typed.persistence.scaladsl.PersistentActor
-import akka.typed.persistence.scaladsl.PersistentActor.{Actions, SideEffect}
+import akka.typed.persistence.scaladsl.PersistentActor.{ChainableEffect, CommandHandler, SideEffect}
 import com.lightbend.lagom.core.es.PersistentEntity.{CommandEnvelop, WithReply}
 import akka.typed.scaladsl.AskPattern._
 import akka.util.Timeout
+
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 import scala.concurrent.Future
@@ -24,29 +25,19 @@ class PersistentEntityRef[Cmd <: WithReply](entityId: String, entityFactory: => 
     // just a trial for now to see we can build a Akka Typed Behavior using Lagom's PersistentEntity Behavior
     val entity = entityFactory
 
+    type Command = entity.Command
+    type Event = entity.Event
+    type StateOpt = Option[entity.State]
+
     PersistentActor
-      .persistentEntity[CommandEnvelop[entity.Command, entity.Command#ReplyType], entity.Event, Option[entity.State]](
+      .persistentEntity[CommandEnvelop[Command, Command#ReplyType], Event, StateOpt](
         persistenceIdFromActorName = (name: String) => name,
         initialState = None,
-        actions = Actions { (_, cmd, state) =>
-
-          val effect =
-            entity
-              .behavior(state)
-              .applyCommand(cmd)
-
-          PersistentActor
-            .PersistAll[entity.Event, Option[entity.State]](effect.events)
-            .andThen { stateOpt =>
-              stateOpt.foreach { st =>
-                effect.sideEffects.collect {
-                  case SideEffect(effectFunc) => effectFunc(st)
-                }
-              }
-            }
+        commandHandler = CommandHandler { (_, state, cmd) =>
+          entity.behavior(state).applyCommand(cmd)
         },
 
-        applyEvent = (evt, stateOpt) => {
+      eventHandler = (stateOpt, evt) => {
           Option( // <-- need to wrap it back in a Option
             entity
               .behavior(stateOpt)

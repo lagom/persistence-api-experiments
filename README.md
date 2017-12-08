@@ -1,14 +1,14 @@
 # Persistence API Proposal
-This repo is a sandbox to experiment with a new Persistence API for Lagom. At the moment, it only has a very minimal, Scala only, implementation that doesn't even use Akka. The purpose is to work on the shape of the API and get the types on the right place. The same can be achieved in Java, but much less concise. 
+This repo is a sandbox to experiment with a new Persistence API for Lagom. At the moment, it only has a very minimal, Scala only, implementation based on also experimental Akka Typed Persistence API. The purpose is to work on the shape of this API and get the types on the right place. The same can be achieved in Java, but much less concise. 
 
 The original motivation for reviewing the current API comes from feedback we got in Gitter and Mailing list. Part of the discussion is documented at [Lagom issue #919](https://github.com/lagom/lagom/issues/919).
 
 This current proposal has a few new features and/or advantages over the current API. 
 
 1. `Behavior` is a function from `Option[State] => Actions`
-2. No explicit initial value needed. Initial value of a model is always None. We don't need to force users to come up with a definition of empty. For legacy reasons, we may need to provide the means for defining an initial state.
+2. No explicit initial value needed. Initial value of a model is always None. We don't need to force users to come up with a definition of empty. For legacy reasons, provide the means for defining an initial state.
 3. Command handlers have only one argument, the `Command`. No `Context` or `State` passed around. `Context` become obsolete and `State` is available in scope by other means (see bellow).
-4. `Effect` is the new black. A command handler is a function from `Command => Effect[Command]` and we provide a `EffectBuilder` DSL for different types. At the moment we have support for `Effects` emitting: `Event`, `Seq[Event]`, `Option[Event]`, `Try[Event]` and `Try[Seq[Event]]`. 
+4. `Effect` is the new black. A command handler is a function from `Command => Effect` and we provide a `EffectBuilder` DSL for different types. At the moment we have support for `Effects` emitting: `Event`, `Seq[Event]` and `Option[Event]`. 
 5. No need for `onReadOnlyCommand`. A read-only directive is a general `Effect` that does not emit events.
 
 Please, feel free to open issues to make suggestions and discuss any topic in detail.
@@ -22,98 +22,20 @@ The `Behavior` can be decomposed in two main functions.
 * `None => Actions` when the `Entity` doesn't exists yet. At API level this is a `() => Actions`
 * `Some[State] => Actions` when the `Entity` was already created.  At API level this is a `PartialFunction[State, Actions]`
 
+There is an alternative `Behavior` builder where we first must defined a initial value followed by a function `State => Actions`.
+
 At API level, the developers doesn't need to deal with `Option`. They only need to provide the Actions before and after creation. This will also allow the usage of ADTs to express model transition.
 
 ## Simplified Command Handlers
-The current API (Lagom 1.3.8) defines a command handler as a `PartialFunction[(Command, CommandContext[Reply], State), Persist]`. In this new API it is simplified to `PartialFunction[Command, Effect[Command]]`. 
+The current API (Lagom 1.3.19) defines a command handler as a `PartialFunction[(Command, CommandContext[Reply], State), Persist]`. In this new API it is simplified to `PartialFunction[Command, Effect]`. 
 
 The `Context` becomes obsolete because of a new Fluent / Intention Driven API.
 
-## Code snippet 
+## Code examples 
 
-This is only a short example of the main features. Check the [`AccountEntity`](https://github.com/lagom/persistence-api-experiments/blob/master/src/main/scala/com/lightbend/lagom/core/persistence/effects/core/persistence/AccountEntity.scala) for full example. 
+There are  three examples in the test folder to demonstrate the available API and its look-and-feel.
 
-As mentioned before, the `Behavior` is defined as two functions pre-construction and post-construction. The DSL exposes the fact that there is two phases in the life of an `Entity`, `first` we create it `and then` we may update it. 
-
-```scala
-Behavior
-  .first {  // () => Actions equivalent to None => Actions
-    depositCommandHandlers and atCreationEvents
-  }
-  .andThen { // PartialFunction[State, Actions] equivalent to Some[State] => Actions
-    case account => // Account is a single type, but it could be an ADT 
-      readOnlyCommands and
-        withdrawCommandHandlers(account) and
-        depositCommandHandlers and
-        afterCreationEvents(account)
-  }
-```
-
-We can defined `Actions` and combine then using `and`. Note that not all `Actions` need to have the `State` available in scope. `Withdraw` need it because we don't want to go bellow zero. `Events Handlers` do need the State. Read only `Command Handlers` don't need it passed, they will be made available on the `replyWith` method (see below).
-
-### Deposit Command Handler
-```scala
-case class Deposit(amount: Double) extends AccountCommand[Double]
-
-val depositCommandHandlers: CommandHandlers =
-  onCommand {
-    // this is directive builder that expects one single Event
-    Handler[Deposit]
-      .persistOne {
-        case cmd => DepositExecuted(cmd.amount)
-      }
-      .andThen { (evt, state) =>
-        println(s"Deposit ${evt.amount}, current balance is ${state.amount}")
-      }
-      // reply with new balance
-      .replyWith(_.amount)
-  }
-```
-The `Deposit` handler start with the definition of a `Handler[Deposit]` where we fix the type of the command. Next we can declare if it will emit one or many events (in this example only one), then we may declare zero or more `andThen` callabacks. Finally, we declare what needs to be returned as a reply. Must be a `Double` as defined by the `Deposit` command.
-
-### Withdraw Command Handler
-```scala
-case class Withdraw(amount: Double) extends AccountCommand[Done]
-
-def withdrawCommandHandlers(account: Account): CommandHandlers =
-  onCommand {
-    TryHandler[Withdraw]
-      .persistOne { // <- this Effect builder expects a Try[Event]
-        case cmd =>
-          account
-            .validateWithdraw(cmd.amount) // <- this method returns a Try[Double]
-            .map(WithdrawExecuted)
-      }
-    // NOTE: we don't need reply because Withdraw replies with Done
-    // and there is an implicit for it
-  }
-```
-
-Different than the `Deposit` variation, the `Withdraw` command handler do need the current `Account` state in scope. This is made available as an argument to `withdrawCommandHandlers` method. 
-
-Because a `Withdraw` may fail, we use a variation of an `EffectBuilder` that expects a `Try[Event]`. This gives us the possibility to validate the command using idiomatic Scala. 
-That won't be possible in the Java variation unless we introduce a `Try` type or similar. 
-
-`Withdraw` doesn't need to explicitly define a reply. The command definition specify it to be `Done` and there is an implicit to convert from `EffectBuilder` to `Effect`. That won't be possible in Java neither.
-
-### ReadOnly Commands
-
-A read-only command is no different and doesn't require special API. We only need a `EffectBuilder` that never emits events and doesn't provide `andThen` callbacks. 
-
-```scala
-
-case object GetBalance extends AccountCommand[Double]
-case object GetState extends AccountCommand[Account]`
-
-val readOnlyCommandHandlers: CommandHandlers =
-  onCommand {
-    ReadOnly[GetBalance.type].replyWith(_.amount)
-  }
-  .onCommand {
-    // there is also an implicit for reply with State
-    // but intellij gives an error hence the explicit call here
-    ReadOnly[GetState.type].replyWith(identity)
-  }
-```
-
+* [`Hello World`](https://github.com/lagom/persistence-api-experiments/blob/master/src/test/scala/com/lightbend/lagom/hello/model/Hello.scala) 
+* [`Account`](https://github.com/lagom/persistence-api-experiments/blob/master/src/test/scala/com/lightbend/lagom/account/model/Account.scala) 
+* [`Raffle`](https://github.com/lagom/persistence-api-experiments/blob/master/src/test/scala/com/lightbend/lagom/raffle/model/Raffle.scala) 
       

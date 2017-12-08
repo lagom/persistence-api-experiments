@@ -46,7 +46,7 @@ abstract class PersistentEntity {
   type Behavior = PartialFunction[Option[State], Actions]
 
   type StateToActions = PartialFunction[State, Actions]
-  type CommandHandler = PartialFunction[CommandEnvelop[_, _], Effect[Event, State]]
+  type CommandHandler = PartialFunction[CommandEnvelop[_, _], Effect[Event, Option[State]]]
   type CommandHandlerTyped[C <: Command] = PartialFunction[CommandEnvelop[C, C#ReplyType], Effect[Event, State]]
   type EventHandler = PartialFunction[Event, State]
 
@@ -60,7 +60,7 @@ abstract class PersistentEntity {
   final case class Actions(private val commandHandlers: CommandHandler = PartialFunction.empty,
                            private val eventHandlers: EventHandler = PartialFunction.empty) {
 
-    def applyCommand[C <: Command](cmd: CommandEnvelop[C, C#ReplyType]): Effect[Event, State] =
+    def applyCommand[C <: Command](cmd: CommandEnvelop[C, C#ReplyType]): Effect[Event, Option[State]] =
       commandHandlers(cmd)
 
     def applyEvent(evt: Event): State = eventHandlers(evt)
@@ -73,9 +73,16 @@ abstract class PersistentEntity {
              handler.isDefinedAt(cmd.asInstanceOf[C]) =>
 
           val builder = handler(cmd.asInstanceOf[C])
-          PersistentActor
-            .PersistAll[Event, State](builder.events)
-              .andThen(state => builder.andThenCallbacks(state))
+          PersistentActor.Effect
+            .persist[Event, State](builder.events)
+              .andThen { state => 
+                Try(builder.andThenCallbacks(state)) match {
+                  // failures in callbacks are reported back
+                  case Failure(e) => replyTo ! Left(e)
+                  case Success(_) => // do nothing
+                }
+                ()
+              }
               .andThen { state =>
                 Try(builder.reply(state)) match {
                   case Success(replyValue) => replyTo ! Right(replyValue)
@@ -98,8 +105,8 @@ abstract class PersistentEntity {
       val commandHandler: CommandHandlerTyped[C] = {
         case CommandEnvelop(_, cmd, replyTo)
           if cmd.getClass == targetCmd.runtimeClass =>
-          PersistentActor
-            .PersistNothing[Event, State]()
+          PersistentActor.Effect
+            .none[Event, State]
             .andThen(_ => replyTo ! Left(throwable))
       }
       copy(commandHandlers = commandHandlers.orElse(commandHandler.asInstanceOf[CommandHandler]))
@@ -112,8 +119,8 @@ abstract class PersistentEntity {
     def rejectAll(throwable: => Throwable): Actions = {
       val commandHandler: CommandHandlerTyped[Command] = {
         case CommandEnvelop(_, _, replyTo) =>
-          PersistentActor
-            .PersistNothing[Event, State]()
+          PersistentActor.Effect
+            .none[Event, State]
             .andThen(_ => replyTo ! Left(throwable))
       }
       copy(commandHandlers = commandHandlers.orElse(commandHandler.asInstanceOf[CommandHandler]))
@@ -167,10 +174,7 @@ abstract class PersistentEntity {
       val andThenCallback: (State) => Unit = {
         state =>
           andThenCallbacks.reverse.foreach { sideEffect =>
-            // each side-effect function is called within a Try
-            // failures should not impact subsequent callbacks
-            // TODO: we may want to log it
-            Try(sideEffect(state))
+            sideEffect(state)
           }
       }
 
@@ -202,7 +206,7 @@ abstract class PersistentEntity {
     def persist(eventOpt: Option[Event]): EffectBuilderStage =
       EffectBuilderStage(eventOpt.toIndexedSeq)
 
-    def ignore: EffectBuilderStage = persist(None)
+    def none: EffectBuilderStage = persist(None)
 
     def reject(message: String): EffectBuilder[Nothing] =
       reject(InvalidCommandException(message))

@@ -20,7 +20,7 @@ object Hello extends PersistentEntity {
         case cmd =>  Effect.persist(GreetingMessageChanged(cmd.message))
       }
       .onCommand[SayNothing.type] {
-        case _ => Effect.ignore
+        case _ => Effect.none
       }
 
   def eventHandler(state: Hello) =

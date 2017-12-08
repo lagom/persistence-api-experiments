@@ -54,10 +54,10 @@ object Raffle extends PersistentEntity {
       val ignoreRemovals =
         actions
           .onCommand[RemoveAllParticipants.type] {
-            case _ => Effect.ignore
+            case _ => Effect.none
           }
           .onCommand[RemoveParticipant] {
-            case _ => Effect.ignore
+            case _ => Effect.none
           }
     }
 
