@@ -22,7 +22,7 @@ The `Behavior` can be decomposed in two main functions.
 * `None => Actions` when the `Entity` doesn't exists yet. At API level this is a `() => Actions`
 * `Some[State] => Actions` when the `Entity` was already created.  At API level this is a `PartialFunction[State, Actions]`
 
-There is an alternative `Behavior` builder where we first must defined a initial value followed by a function `State => Actions`.
+There is an alternative `Behavior` builder where we first must defined an initial value followed by a function `State => Actions`.
 
 At API level, the developers doesn't need to deal with `Option`. They only need to provide the Actions before and after creation. This will also allow the usage of ADTs to express model transition.
 

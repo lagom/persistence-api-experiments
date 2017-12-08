@@ -5,33 +5,38 @@ import com.lightbend.lagom.core.es.PersistentEntity
 import com.lightbend.lagom.core.es.PersistentEntity.ReplyType
 
 
-case class Account(amount: Double) {
+
+object Account extends PersistentEntity {
+
+  type State = Account
+  type Command = AccountCommand[_]
+  type Event = AccountEvent
 
 
-  import Account._
+  case class Account(amount: Double) {
 
-  def validWithdraw(withdrawAmount: Double): Boolean =
-    amount - withdrawAmount >= 0
+    def validWithdraw(withdrawAmount: Double): Boolean =
+      amount - withdrawAmount >= 0
 
-  val readOnlyCommandHandlers = {
-    actions
-      .onCommand[GetBalance.type] {
+    val readOnlyCommandHandlers = {
+      actions
+        .onCommand[GetBalance.type] {
         case _ => ReplyWith(_.amount)
       }
-      .onCommand[GetState.type] {
+        .onCommand[GetState.type] {
         case _ => ReplyWith.state
       }
-  }
-
-  val eventHandlers =
-    actions.onEvent {
-      case Deposited(txAmount) => copy(amount = amount +  txAmount)
-      case Withdrawn(txAmount) => copy(amount = amount -  txAmount)
     }
 
-  val withdrawCommandHandler =
-    actions
-      .onCommand[Withdraw] {
+    val eventHandlers =
+      actions.onEvent {
+        case Deposited(txAmount) => copy(amount = amount +  txAmount)
+        case Withdrawn(txAmount) => copy(amount = amount -  txAmount)
+      }
+
+    val withdrawCommandHandler =
+      actions
+        .onCommand[Withdraw] {
         case Withdraw(txAmount) if validWithdraw(txAmount) =>
           Effect
             .persist(Withdrawn(txAmount))
@@ -42,14 +47,7 @@ case class Account(amount: Double) {
           Effect
             .reject("Insufficient balance.")
       }
-}
-
-object Account extends PersistentEntity {
-
-  type State = Account
-  type Command = AccountCommand[_]
-  type Event = AccountEvent
-
+  }
   private val depositCommandHandlers =
     actions
       .onCommand[Deposit] {
@@ -93,24 +91,26 @@ object Account extends PersistentEntity {
             depositCommandHandlers and
             account.withdrawCommandHandler
       }
+
+
+
+  sealed trait AccountCommand[R] extends ReplyType[R]
+
+  case class Deposit(amount: Double) extends AccountCommand[Double]
+
+  case class Withdraw(amount: Double) extends AccountCommand[Done]
+
+  case object GetBalance extends AccountCommand[Double]
+
+  case object GetState extends AccountCommand[Account]
+
+
+  sealed trait AccountEvent {
+    def amount: Double
+  }
+  case class Deposited(amount: Double) extends AccountEvent
+
+  case class Withdrawn(amount: Double) extends AccountEvent
+
 }
 
-
-
-sealed trait AccountCommand[R] extends ReplyType[R]
-
-case class Deposit(amount: Double) extends AccountCommand[Double]
-
-case class Withdraw(amount: Double) extends AccountCommand[Done]
-
-case object GetBalance extends AccountCommand[Double]
-
-case object GetState extends AccountCommand[Account]
-
-
-sealed trait AccountEvent {
-  def amount: Double
-}
-case class Deposited(amount: Double) extends AccountEvent
-
-case class Withdrawn(amount: Double) extends AccountEvent
